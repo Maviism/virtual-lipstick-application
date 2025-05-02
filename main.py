@@ -1,6 +1,9 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import tkinter as tk
+from tkinter import ttk, colorchooser
+from PIL import Image, ImageTk
 
 # Initialize MediaPipe Face Detection and Face Mesh solutions
 mp_face_detection = mp.solutions.face_detection
@@ -147,7 +150,7 @@ def apply_lipstick(image, landmarks, color, intensity=0.8, blur_amount=5):
     highlight_mask = cv2.GaussianBlur(highlight_mask, (15, 15), 0)
     
     # Create a fixed scalar value for highlight intensity (0.3)
-    highlight_intensity = 0.3
+    highlight_intensity = 0.05
     
     # Apply the highlight effect using proper scalar values
     highlight_layer = np.ones_like(image) * 255
@@ -196,7 +199,8 @@ def draw_color_options(image, current_idx):
     cv2.putText(image, instructions, (20, swatch_y + swatch_size + 30), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
-def main():
+# Original main function - kept for reference but will be replaced by the tkinter version
+def main_original():
     # Initialize webcam
     cap = cv2.VideoCapture(0)
     
@@ -299,6 +303,265 @@ def main():
     
     cap.release()
     cv2.destroyAllWindows()
+
+# New tkinter GUI wrapper class
+class LipstickApp:
+    def __init__(self, window, window_title):
+        self.window = window
+        self.window.title(window_title)
+        
+        # Create a frame for the webcam feed
+        self.frame_webcam = ttk.Frame(window)
+        self.frame_webcam.pack(side=tk.LEFT, padx=10, pady=10)
+        
+        # Create a label for the webcam feed
+        self.label_webcam = ttk.Label(self.frame_webcam)
+        self.label_webcam.pack()
+        
+        # Create a frame for the controls
+        self.frame_controls = ttk.Frame(window)
+        self.frame_controls.pack(side=tk.RIGHT, padx=10, pady=10, fill=tk.Y)
+        
+        # Add a section title for lipstick settings
+        ttk.Label(self.frame_controls, text="Lipstick Settings", font=("Arial", 14, "bold")).pack(pady=10)
+        
+        # Create a frame for preset colors
+        self.frame_presets = ttk.LabelFrame(self.frame_controls, text="Preset Colors")
+        self.frame_presets.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Add color buttons for presets
+        self.preset_buttons = []
+        for i, color in enumerate(LIPSTICK_COLORS):
+            # Convert BGR to RGB for tkinter
+            rgb_color = f'#{color[2]:02x}{color[1]:02x}{color[0]:02x}'
+            btn = ttk.Button(self.frame_presets, text=f"Color {i+1}", 
+                            command=lambda c=color, i=i: self.select_preset_color(c, i))
+            btn.pack(side=tk.LEFT, padx=2, pady=5)
+            self.preset_buttons.append(btn)
+            
+            # Color indicator next to button
+            color_indicator = tk.Canvas(self.frame_presets, width=15, height=15, bg=rgb_color)
+            color_indicator.pack(side=tk.LEFT, padx=(0, 5), pady=5)
+        
+        # Add a custom color picker button
+        ttk.Button(self.frame_controls, text="Choose Custom Color", 
+                   command=self.choose_custom_color).pack(fill=tk.X, padx=5, pady=5)
+        
+        # Display current color
+        self.frame_current_color = ttk.LabelFrame(self.frame_controls, text="Current Color")
+        self.frame_current_color.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.current_color_canvas = tk.Canvas(self.frame_current_color, width=50, height=30, bg='red')
+        self.current_color_canvas.pack(padx=5, pady=5)
+        
+        # Add sliders for parameters
+        self.frame_sliders = ttk.LabelFrame(self.frame_controls, text="Effect Parameters")
+        self.frame_sliders.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Intensity slider
+        ttk.Label(self.frame_sliders, text="Color Intensity:").pack(anchor=tk.W, padx=5)
+        self.intensity_var = tk.DoubleVar(value=0.8)
+        self.intensity_slider = ttk.Scale(self.frame_sliders, from_=0.1, to=1.0, 
+                                          variable=self.intensity_var, orient=tk.HORIZONTAL, length=200)
+        self.intensity_slider.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Blur amount slider
+        ttk.Label(self.frame_sliders, text="Edge Smoothness:").pack(anchor=tk.W, padx=5)
+        self.blur_var = tk.IntVar(value=5)
+        self.blur_slider = ttk.Scale(self.frame_sliders, from_=1, to=15, 
+                                     variable=self.blur_var, orient=tk.HORIZONTAL, length=200)
+        self.blur_slider.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Highlight intensity slider
+        ttk.Label(self.frame_sliders, text="Glossy Effect:").pack(anchor=tk.W, padx=5)
+        self.highlight_var = tk.DoubleVar(value=0.05)
+        self.highlight_slider = ttk.Scale(self.frame_sliders, from_=0.0, to=0.3, 
+                                          variable=self.highlight_var, orient=tk.HORIZONTAL, length=200)
+        self.highlight_slider.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Checkbox for showing face mesh
+        self.show_mesh_var = tk.BooleanVar(value=True)
+        self.show_mesh_checkbox = ttk.Checkbutton(self.frame_controls, text="Show Face Mesh", 
+                                                variable=self.show_mesh_var)
+        self.show_mesh_checkbox.pack(anchor=tk.W, padx=5, pady=10)
+        
+        # Add a screenshot button
+        ttk.Button(self.frame_controls, text="Take Screenshot", 
+                  command=self.take_screenshot).pack(fill=tk.X, padx=5, pady=5)
+        
+        # Status bar
+        self.status_var = tk.StringVar(value="Ready")
+        self.statusbar = ttk.Label(window, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
+        self.statusbar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Initialize variables
+        self.webcam = cv2.VideoCapture(0)
+        self.color_idx = 0
+        self.current_color = LIPSTICK_COLORS[self.color_idx]
+        self.update_color_display()
+        
+        # Initialize MediaPipe Face Mesh
+        self.face_mesh = mp_face_mesh.FaceMesh(
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+        
+        # Previous landmarks for stability
+        self.prev_landmarks = None
+        
+        # Start the video capture loop
+        self.update()
+        
+        # Set window close handler
+        self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+    def select_preset_color(self, color, idx):
+        """Set lipstick color to a preset color"""
+        self.current_color = color
+        self.color_idx = idx
+        self.update_color_display()
+        self.status_var.set(f"Selected preset color {idx+1}")
+        
+    def choose_custom_color(self):
+        """Open color picker for custom lipstick color"""
+        # Convert BGR to RGB for the color picker
+        current_rgb = (self.current_color[2], self.current_color[1], self.current_color[0])
+        color_result = colorchooser.askcolor(rgb=current_rgb, title="Choose Lipstick Color")
+        
+        if color_result[0]:  # If user didn't cancel
+            rgb_color = color_result[0]
+            # Convert RGB to BGR for OpenCV
+            self.current_color = (int(rgb_color[2]), int(rgb_color[1]), int(rgb_color[0]))
+            self.color_idx = -1  # Custom color
+            self.update_color_display()
+            self.status_var.set("Custom color selected")
+    
+    def update_color_display(self):
+        """Update the current color display"""
+        # Convert BGR to RGB for tkinter
+        rgb_color = f'#{self.current_color[2]:02x}{self.current_color[1]:02x}{self.current_color[0]:02x}'
+        self.current_color_canvas.config(bg=rgb_color)
+    
+    def take_screenshot(self):
+        """Save current frame as screenshot"""
+        if hasattr(self, 'current_frame'):
+            timestamp = cv2.getTickCount()
+            filename = f"lipstick_screenshot_{timestamp}.jpg"
+            cv2.imwrite(filename, self.current_frame)
+            self.status_var.set(f"Screenshot saved as {filename}")
+    
+    def update(self):
+        """Update the video frame"""
+        ret, frame = self.webcam.read()
+        
+        if ret:
+            # Process the frame
+            frame = cv2.flip(frame, 1)  # Mirror the image for a more intuitive view
+            
+            # Process with MediaPipe
+            frame.flags.writeable = False
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.face_mesh.process(frame_rgb)
+            frame.flags.writeable = True
+            # frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            
+            # Create a clean copy for lipstick application
+            clean_frame = frame.copy()
+            
+            # Get current parameters from sliders
+            intensity = self.intensity_var.get()
+            blur_amount = self.blur_var.get()
+            show_mesh = self.show_mesh_var.get()
+            
+            # If even blur amount, make it odd (required by GaussianBlur)
+            if blur_amount % 2 == 0:
+                blur_amount += 1
+                
+            if results.multi_face_landmarks:
+                # Use current landmarks
+                face_landmarks = results.multi_face_landmarks[0]
+                self.prev_landmarks = face_landmarks
+                
+                # Apply lipstick
+                frame = apply_lipstick(clean_frame, face_landmarks, self.current_color, intensity, blur_amount)
+                
+                if show_mesh:
+                    # Draw the face landmarks
+                    mp_drawing.draw_landmarks(
+                        image=frame,
+                        landmark_list=face_landmarks,
+                        connections=mp_face_mesh.FACEMESH_TESSELATION,
+                        landmark_drawing_spec=None,
+                        connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style()
+                    )
+                    
+                    # Draw the face contours
+                    mp_drawing.draw_landmarks(
+                        image=frame,
+                        landmark_list=face_landmarks,
+                        connections=mp_face_mesh.FACEMESH_CONTOURS,
+                        landmark_drawing_spec=None,
+                        connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_contours_style()
+                    )
+                    
+                    # Draw the eye landmarks
+                    mp_drawing.draw_landmarks(
+                        image=frame,
+                        landmark_list=face_landmarks,
+                        connections=mp_face_mesh.FACEMESH_IRISES,
+                        landmark_drawing_spec=None,
+                        connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_iris_connections_style()
+                    )
+            elif self.prev_landmarks:
+                # If no landmarks detected in current frame but we have previous ones
+                frame = apply_lipstick(clean_frame, self.prev_landmarks, self.current_color, intensity, blur_amount)
+            
+            # Store the current frame for screenshots
+            self.current_frame = frame.copy()
+            
+            # Convert to RGB for tkinter
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Convert to PIL format and then to ImageTk
+            img = Image.fromarray(frame_rgb)
+            img = img.resize((640, 480), Image.LANCZOS)  # Resize for display
+            imgtk = ImageTk.PhotoImage(image=img)
+            
+            # Update the label with new image
+            self.label_webcam.imgtk = imgtk
+            self.label_webcam.configure(image=imgtk)
+        
+        # Schedule the next update
+        self.window.after(10, self.update)
+    
+    def on_closing(self):
+        """Clean up resources when window is closed"""
+        if self.webcam.isOpened():
+            self.webcam.release()
+        self.face_mesh.close()
+        self.window.destroy()
+
+def main():
+    # Create the root window
+    root = tk.Tk()
+    root.title("Lipstick Virtual Try-On")
+    
+    # Set a more modern theme if available
+    try:
+        style = ttk.Style()
+        available_themes = style.theme_names()
+        if 'clam' in available_themes:
+            style.theme_use('clam')  # Using 'clam' theme for better looking controls
+    except:
+        pass  # If theming fails, use default
+    
+    # Create the app
+    app = LipstickApp(root, "Lipstick Virtual Try-On GUI")
+    
+    # Start the main loop
+    root.mainloop()
 
 if __name__ == "__main__":
     main()
