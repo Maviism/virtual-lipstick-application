@@ -2,14 +2,16 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import tkinter as tk
-from tkinter import ttk, colorchooser
+from tkinter import ttk, colorchooser, filedialog
 from PIL import Image, ImageTk
+import os
 
 # Initialize MediaPipe Face Detection and Face Mesh solutions
 mp_face_detection = mp.solutions.face_detection
 mp_face_mesh = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
+mp_selfie_segmentation = mp.solutions.selfie_segmentation  # Add selfie segmentation
 
 # Define lipstick shades with BGR format (OpenCV uses BGR instead of RGB)
 LIPSTICK_COLORS = [
@@ -178,9 +180,6 @@ class VirtualMakeUpApp:
         self.frame_controls = ttk.Frame(window)
         self.frame_controls.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.Y)
         
-        # Add a section title for lipstick settings
-        ttk.Label(self.frame_controls, text="Lipstick Settings", font=("Arial", 14, "bold")).pack(pady=10)
-        
         # Create a frame for preset colors
         self.frame_presets = ttk.LabelFrame(self.frame_controls, text="Preset Colors")
         self.frame_presets.pack(fill=tk.X, padx=5, pady=5)
@@ -220,6 +219,56 @@ class VirtualMakeUpApp:
         self.current_color_canvas = tk.Canvas(self.frame_current_color, width=50, height=30, bg='red')
         self.current_color_canvas.pack(padx=5, pady=5)
         
+        # Background removal checkbox
+        self.remove_bg_var = tk.BooleanVar(value=True)
+        self.remove_bg_checkbox = ttk.Checkbutton(self.frame_controls, text="Remove Background", 
+                                                variable=self.remove_bg_var)
+        self.remove_bg_checkbox.pack(anchor=tk.W, padx=5, pady=5)
+        
+        # Background options frame
+        self.frame_bg_options = ttk.LabelFrame(self.frame_controls, text="Background Options")
+        self.frame_bg_options.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Background type radio buttons
+        self.bg_type = tk.StringVar(value="image")
+        
+        ttk.Radiobutton(self.frame_bg_options, text="Solid Color", 
+                       variable=self.bg_type, value="color").pack(anchor=tk.W, padx=5, pady=2)
+        
+        ttk.Radiobutton(self.frame_bg_options, text="Image Background", 
+                       variable=self.bg_type, value="image").pack(anchor=tk.W, padx=5, pady=2)
+        
+        # Background color picker
+        self.bg_color_frame = ttk.Frame(self.frame_bg_options)
+        self.bg_color_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        ttk.Label(self.bg_color_frame, text="Background Color:").pack(side=tk.LEFT, padx=2)
+        
+        self.bg_color = (0, 128, 0)  # Default green background (in BGR)
+        
+        self.bg_color_canvas = tk.Canvas(self.bg_color_frame, width=30, height=20, bg='#008000')
+        self.bg_color_canvas.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(self.bg_color_frame, text="Choose", width=8, 
+                  command=self.choose_bg_color).pack(side=tk.LEFT, padx=2)
+        
+        # Background image selection
+        ttk.Button(self.frame_bg_options, text="Choose Background Image", 
+                  command=self.choose_bg_image).pack(fill=tk.X, padx=5, pady=5)
+        
+        self.bg_image_label = ttk.Label(self.frame_bg_options, text="No image selected")
+        self.bg_image_label.pack(padx=5, pady=2)
+        
+        # Store the background image
+        self.bg_image = None
+        self.bg_image_path = None
+        
+        # Load default background image
+        default_bg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "default-bg.jpg")
+        if os.path.exists(default_bg_path):
+            self.default_bg_image = cv2.imread(default_bg_path)
+        else:
+            self.default_bg_image = None
         
         # Checkbox for showing face mesh
         self.show_mesh_var = tk.BooleanVar(value=False)
@@ -241,6 +290,11 @@ class VirtualMakeUpApp:
             min_tracking_confidence=0.5
         )
         
+        # Initialize MediaPipe Selfie Segmentation
+        self.selfie_segmentation = mp_selfie_segmentation.SelfieSegmentation(
+            model_selection=0  # 0 for general model, 1 for landscape model
+        )
+        
         # Previous landmarks for stability
         self.prev_landmarks = None
         
@@ -250,6 +304,51 @@ class VirtualMakeUpApp:
         # Set window close handler
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         
+    def choose_bg_color(self):
+        """Open color picker for background color"""
+        # Convert BGR to RGB for the color picker
+        current_rgb = (self.bg_color[2], self.bg_color[1], self.bg_color[0])
+        
+        color_result = colorchooser.askcolor(initialcolor=current_rgb, title="Choose Background Color")
+        
+        if color_result[0]:  # If user didn't cancel
+            rgb_color = color_result[0]
+            # Convert RGB to BGR for OpenCV
+            self.bg_color = (int(rgb_color[2]), int(rgb_color[1]), int(rgb_color[0]))
+            
+            # Update the color display
+            self.bg_color_canvas.config(bg=color_result[1])
+            
+            # Select the color option
+            self.bg_type.set("color")
+    
+    def choose_bg_image(self):
+        """Open file dialog to select a background image"""
+        file_path = filedialog.askopenfilename(
+            title="Select Background Image",
+            filetypes=[
+                ("Image files", "*.png;*.jpg;*.jpeg;*.bmp"),
+                ("All files", "*.*")
+            ]
+        )
+        
+        if file_path:
+            try:
+                # Load the image
+                self.bg_image_path = file_path
+                self.bg_image = cv2.imread(file_path)
+                
+                # Update the display with the filename
+                filename = os.path.basename(file_path)
+                if len(filename) > 25:
+                    filename = filename[:22] + "..."
+                self.bg_image_label.config(text=f"Selected: {filename}")
+                
+                # Select the image option
+                self.bg_type.set("image")
+            except Exception as e:
+                print(f"Error loading image: {str(e)}")
+    
     def select_preset_color(self, color, idx):
         """Set lipstick color to a preset color"""
         self.current_color = color
@@ -260,7 +359,6 @@ class VirtualMakeUpApp:
         """Open color picker for custom lipstick color"""
         # Convert BGR to RGB for the color picker
         current_rgb = (self.current_color[2], self.current_color[1], self.current_color[0])
-        # Change from 'rgb' to 'initialcolor' parameter which is what tkinter's colorchooser expects
         color_result = colorchooser.askcolor(initialcolor=current_rgb, title="Choose Lipstick Color")
         
         if color_result[0]:  # If user didn't cancel
@@ -284,16 +382,46 @@ class VirtualMakeUpApp:
             # Process the frame
             frame = cv2.flip(frame, 1)  # Mirror the image for a more intuitive view
             
-            # Process with MediaPipe
-            frame.flags.writeable = False
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = self.face_mesh.process(frame_rgb)
-            frame.flags.writeable = True
-            # frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            
             # Create a clean copy for lipstick application
             clean_frame = frame.copy()
             
+            # Process with MediaPipe Face Mesh
+            frame.flags.writeable = False
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            face_results = self.face_mesh.process(frame_rgb)
+            
+            # Background removal if enabled
+            if self.remove_bg_var.get():
+                # Process with MediaPipe Selfie Segmentation
+                segmentation_results = self.selfie_segmentation.process(frame_rgb)
+                
+                # Create a mask of the person
+                condition = np.stack((segmentation_results.segmentation_mask,) * 3, axis=-1) > 0.1
+                
+                # Process background based on selected option
+                if self.bg_type.get() == "color":
+                    # Create solid color background
+                    bg_image = np.ones(frame.shape, dtype=np.uint8)
+                    bg_image[:] = self.bg_color
+                    
+                elif self.bg_type.get() == "image" and self.bg_image is not None:
+                    # Resize background image to match frame size
+                    bg_image = cv2.resize(self.bg_image, (frame.shape[1], frame.shape[0]))
+                else:
+                    # Use default background if available, else green background
+                    if self.default_bg_image is not None:
+                        bg_image = cv2.resize(self.default_bg_image, (frame.shape[1], frame.shape[0]))
+                    else:
+                        # Default to green background if image is not available
+                        bg_image = np.ones(frame.shape, dtype=np.uint8)
+                        bg_image[:] = (0, 128, 0)  # Green default
+                
+                # Apply the foreground mask and background image
+                frame = np.where(condition, frame, bg_image)
+                clean_frame = frame.copy()  # Update clean frame with background removed
+            
+            frame.flags.writeable = True
+                
             # Set lipstick intensity and blur amount
             intensity = 0.8
             blur_amount = 5
@@ -303,9 +431,9 @@ class VirtualMakeUpApp:
             if blur_amount % 2 == 0:
                 blur_amount += 1
                 
-            if results.multi_face_landmarks:
+            if face_results.multi_face_landmarks:
                 # Use current landmarks
-                face_landmarks = results.multi_face_landmarks[0]
+                face_landmarks = face_results.multi_face_landmarks[0]
                 self.prev_landmarks = face_landmarks
                 
                 # Apply lipstick
@@ -362,6 +490,7 @@ class VirtualMakeUpApp:
         if self.webcam.isOpened():
             self.webcam.release()
         self.face_mesh.close()
+        self.selfie_segmentation.close()
         self.window.destroy()
 
 def main():
