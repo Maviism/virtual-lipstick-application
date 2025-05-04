@@ -221,15 +221,6 @@ class VirtualMakeUpApp:
         self.current_color_canvas.pack(padx=5, pady=5)
         
         
-        # Intensity slider
-        self.intensity_var = tk.DoubleVar(value=0.8)
-        
-        # Blur amount slider
-        self.blur_var = tk.IntVar(value=5)
-        
-        # Highlight intensity slider
-        self.highlight_var = tk.DoubleVar(value=0.05)
-        
         # Checkbox for showing face mesh
         self.show_mesh_var = tk.BooleanVar(value=False)
         self.show_mesh_checkbox = ttk.Checkbutton(self.frame_controls, text="Show Face Mesh", 
@@ -264,13 +255,13 @@ class VirtualMakeUpApp:
         self.current_color = color
         self.color_idx = idx
         self.update_color_display()
-        self.status_var.set(f"Selected preset color {idx+1}")
         
     def choose_custom_color(self):
         """Open color picker for custom lipstick color"""
         # Convert BGR to RGB for the color picker
         current_rgb = (self.current_color[2], self.current_color[1], self.current_color[0])
-        color_result = colorchooser.askcolor(rgb=current_rgb, title="Choose Lipstick Color")
+        # Change from 'rgb' to 'initialcolor' parameter which is what tkinter's colorchooser expects
+        color_result = colorchooser.askcolor(initialcolor=current_rgb, title="Choose Lipstick Color")
         
         if color_result[0]:  # If user didn't cancel
             rgb_color = color_result[0]
@@ -278,7 +269,6 @@ class VirtualMakeUpApp:
             self.current_color = (int(rgb_color[2]), int(rgb_color[1]), int(rgb_color[0]))
             self.color_idx = -1  # Custom color
             self.update_color_display()
-            self.status_var.set("Custom color selected")
     
     def update_color_display(self):
         """Update the current color display"""
@@ -304,9 +294,9 @@ class VirtualMakeUpApp:
             # Create a clean copy for lipstick application
             clean_frame = frame.copy()
             
-            # Get current parameters from sliders
-            intensity = self.intensity_var.get()
-            blur_amount = self.blur_var.get()
+            # Set lipstick intensity and blur amount
+            intensity = 0.8
+            blur_amount = 5
             show_mesh = self.show_mesh_var.get()
             
             # If even blur amount, make it odd (required by GaussianBlur)
