@@ -30,9 +30,6 @@ LIPS_ALL = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 26
 # Inner lips contour
 INNER_LIPS = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 415, 310, 311, 312, 13, 82, 81, 80, 191]
 
-# Specific lip landmarks for better accuracy
-UPPER_LIP_CENTER = [0, 267, 13, 14, 17]
-LOWER_LIP_CENTER = [17, 14, 13, 84, 181]
 
 def create_convex_hull(landmarks, indices, image_shape):
     """Create a convex hull from landmarks for better coverage"""
@@ -163,156 +160,15 @@ def apply_lipstick(image, landmarks, color, intensity=0.8, blur_amount=5):
     
     return result
 
-def draw_color_options(image, current_idx):
-    """Draw the color options UI on the image"""
-    h, w, _ = image.shape
-    text = f"Lipstick Color: {current_idx+1}/{len(LIPSTICK_COLORS)}"
-    
-    # Draw text with background
-    text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
-    text_bg_x1, text_bg_y1 = 20, 70
-    text_bg_x2, text_bg_y2 = text_bg_x1 + text_size[0] + 20, text_bg_y1 + text_size[1] + 20
-    
-    cv2.rectangle(image, (text_bg_x1-5, text_bg_y1-5), (text_bg_x2+5, text_bg_y2+5), (0, 0, 0), -1)
-    cv2.putText(image, text, (text_bg_x1, text_bg_y1 + text_size[1]), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    
-    # Draw color swatches
-    swatch_size = 30
-    swatch_space = 10
-    swatch_y = text_bg_y2 + 20
-    
-    for i, color in enumerate(LIPSTICK_COLORS):
-        swatch_x = 20 + i * (swatch_size + swatch_space)
-        if i == current_idx:
-            # Draw highlight for selected color
-            cv2.rectangle(image, (swatch_x-3, swatch_y-3), 
-                         (swatch_x+swatch_size+3, swatch_y+swatch_size+3), 
-                         (255, 255, 255), 2)
-        
-        cv2.rectangle(image, (swatch_x, swatch_y), 
-                     (swatch_x+swatch_size, swatch_y+swatch_size), 
-                     color, -1)
-    
-    # Add usage instructions
-    instructions = "Press 'n' for next color, 'p' for previous, 'h' to hide/show mesh"
-    cv2.putText(image, instructions, (20, swatch_y + swatch_size + 30), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-
-# Original main function - kept for reference but will be replaced by the tkinter version
-def main_original():
-    # Initialize webcam
-    cap = cv2.VideoCapture(0)
-    
-    # Current lipstick color index
-    color_idx = 0
-    
-    # Flag to show/hide mesh
-    show_mesh = True
-    
-    # Setup the face mesh instance
-    with mp_face_mesh.FaceMesh(
-        max_num_faces=1,
-        refine_landmarks=True,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5) as face_mesh:
-        
-        # Initialize previous landmarks for stability
-        prev_landmarks = None
-        
-        while cap.isOpened():
-            success, image = cap.read()
-            if not success:
-                print("Ignoring empty camera frame.")
-                continue
-            
-            # To improve performance, optionally mark the image as not writeable
-            image.flags.writeable = False
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            results = face_mesh.process(image)
-            
-            # Draw the face landmarks on the image
-            image.flags.writeable = True
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-            
-            # Create a clean copy for lipstick application
-            clean_image = image.copy()
-            
-            if results.multi_face_landmarks:
-                # Use current landmarks
-                face_landmarks = results.multi_face_landmarks[0]
-                prev_landmarks = face_landmarks  # Store landmarks for next frame
-                
-                # Apply lipstick on clean image
-                image = apply_lipstick(clean_image, face_landmarks, 
-                                      LIPSTICK_COLORS[color_idx])
-                
-                if show_mesh:
-                    # Draw the face landmarks
-                    mp_drawing.draw_landmarks(
-                        image=image,
-                        landmark_list=face_landmarks,
-                        connections=mp_face_mesh.FACEMESH_TESSELATION,
-                        landmark_drawing_spec=None,
-                        connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style()
-                    )
-                    
-                    # Draw the face contours
-                    mp_drawing.draw_landmarks(
-                        image=image,
-                        landmark_list=face_landmarks,
-                        connections=mp_face_mesh.FACEMESH_CONTOURS,
-                        landmark_drawing_spec=None,
-                        connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_contours_style()
-                    )
-                    
-                    # Draw the eye landmarks
-                    mp_drawing.draw_landmarks(
-                        image=image,
-                        landmark_list=face_landmarks,
-                        connections=mp_face_mesh.FACEMESH_IRISES,
-                        landmark_drawing_spec=None,
-                        connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_iris_connections_style()
-                    )
-            elif prev_landmarks:
-                # If no landmarks detected in current frame but we have previous ones
-                # Use previous landmarks for stability
-                image = apply_lipstick(clean_image, prev_landmarks, 
-                                      LIPSTICK_COLORS[color_idx])
-            
-            # Draw UI with color options
-            draw_color_options(image, color_idx)
-            
-            # Display face landmark detection title
-            cv2.putText(image, f'Face Landmark Detection with Lipstick', (20, 30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            
-            # Show the image
-            cv2.imshow('MediaPipe Face Landmark Detection', image)
-            
-            # Handle key presses
-            key = cv2.waitKey(5) & 0xFF
-            if key == 27:  # ESC to exit
-                break
-            elif key == ord('n'):  # Next color
-                color_idx = (color_idx + 1) % len(LIPSTICK_COLORS)
-            elif key == ord('p'):  # Previous color
-                color_idx = (color_idx - 1) % len(LIPSTICK_COLORS)
-            elif key == ord('h'):  # Toggle mesh visibility
-                show_mesh = not show_mesh
-    
-    cap.release()
-    cv2.destroyAllWindows()
-
 # New tkinter GUI wrapper class
-class LipstickApp:
+class VirtualMakeUpApp:
     def __init__(self, window, window_title):
         self.window = window
         self.window.title(window_title)
         
         # Create a frame for the webcam feed
         self.frame_webcam = ttk.Frame(window)
-        self.frame_webcam.pack(side=tk.LEFT, padx=10, pady=10)
+        self.frame_webcam.pack(side=tk.RIGHT, padx=10, pady=10)
         
         # Create a label for the webcam feed
         self.label_webcam = ttk.Label(self.frame_webcam)
@@ -320,7 +176,7 @@ class LipstickApp:
         
         # Create a frame for the controls
         self.frame_controls = ttk.Frame(window)
-        self.frame_controls.pack(side=tk.RIGHT, padx=10, pady=10, fill=tk.Y)
+        self.frame_controls.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.Y)
         
         # Add a section title for lipstick settings
         ttk.Label(self.frame_controls, text="Lipstick Settings", font=("Arial", 14, "bold")).pack(pady=10)
@@ -329,19 +185,29 @@ class LipstickApp:
         self.frame_presets = ttk.LabelFrame(self.frame_controls, text="Preset Colors")
         self.frame_presets.pack(fill=tk.X, padx=5, pady=5)
         
-        # Add color buttons for presets
-        self.preset_buttons = []
+        # Add color buttons for presets with color as button background
+        self.preset_buttons_frame = ttk.Frame(self.frame_presets)
+        self.preset_buttons_frame.pack(fill=tk.X, padx=2, pady=5)
+        
         for i, color in enumerate(LIPSTICK_COLORS):
             # Convert BGR to RGB for tkinter
             rgb_color = f'#{color[2]:02x}{color[1]:02x}{color[0]:02x}'
-            btn = ttk.Button(self.frame_presets, text=f"Color {i+1}", 
-                            command=lambda c=color, i=i: self.select_preset_color(c, i))
-            btn.pack(side=tk.LEFT, padx=2, pady=5)
-            self.preset_buttons.append(btn)
             
-            # Color indicator next to button
-            color_indicator = tk.Canvas(self.frame_presets, width=15, height=15, bg=rgb_color)
-            color_indicator.pack(side=tk.LEFT, padx=(0, 5), pady=5)
+            # Calculate brightness to determine if text should be black or white
+            brightness = (0.299 * color[2] + 0.587 * color[1] + 0.114 * color[0]) / 255
+            text_color = "black" if brightness > 0.5 else "white"
+            
+            # Create a button with the color as background
+            btn = tk.Button(
+          self.preset_buttons_frame, 
+          text=f"Color {i+1}",
+          bg=rgb_color,
+          fg=text_color,
+          width=10,
+          command=lambda c=color, i=i: self.select_preset_color(c, i)
+            )
+            
+            btn.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2)
         
         # Add a custom color picker button
         ttk.Button(self.frame_controls, text="Choose Custom Color", 
@@ -354,45 +220,21 @@ class LipstickApp:
         self.current_color_canvas = tk.Canvas(self.frame_current_color, width=50, height=30, bg='red')
         self.current_color_canvas.pack(padx=5, pady=5)
         
-        # Add sliders for parameters
-        self.frame_sliders = ttk.LabelFrame(self.frame_controls, text="Effect Parameters")
-        self.frame_sliders.pack(fill=tk.X, padx=5, pady=5)
         
         # Intensity slider
-        ttk.Label(self.frame_sliders, text="Color Intensity:").pack(anchor=tk.W, padx=5)
         self.intensity_var = tk.DoubleVar(value=0.8)
-        self.intensity_slider = ttk.Scale(self.frame_sliders, from_=0.1, to=1.0, 
-                                          variable=self.intensity_var, orient=tk.HORIZONTAL, length=200)
-        self.intensity_slider.pack(fill=tk.X, padx=5, pady=5)
         
         # Blur amount slider
-        ttk.Label(self.frame_sliders, text="Edge Smoothness:").pack(anchor=tk.W, padx=5)
         self.blur_var = tk.IntVar(value=5)
-        self.blur_slider = ttk.Scale(self.frame_sliders, from_=1, to=15, 
-                                     variable=self.blur_var, orient=tk.HORIZONTAL, length=200)
-        self.blur_slider.pack(fill=tk.X, padx=5, pady=5)
         
         # Highlight intensity slider
-        ttk.Label(self.frame_sliders, text="Glossy Effect:").pack(anchor=tk.W, padx=5)
         self.highlight_var = tk.DoubleVar(value=0.05)
-        self.highlight_slider = ttk.Scale(self.frame_sliders, from_=0.0, to=0.3, 
-                                          variable=self.highlight_var, orient=tk.HORIZONTAL, length=200)
-        self.highlight_slider.pack(fill=tk.X, padx=5, pady=5)
         
         # Checkbox for showing face mesh
-        self.show_mesh_var = tk.BooleanVar(value=True)
+        self.show_mesh_var = tk.BooleanVar(value=False)
         self.show_mesh_checkbox = ttk.Checkbutton(self.frame_controls, text="Show Face Mesh", 
                                                 variable=self.show_mesh_var)
         self.show_mesh_checkbox.pack(anchor=tk.W, padx=5, pady=10)
-        
-        # Add a screenshot button
-        ttk.Button(self.frame_controls, text="Take Screenshot", 
-                  command=self.take_screenshot).pack(fill=tk.X, padx=5, pady=5)
-        
-        # Status bar
-        self.status_var = tk.StringVar(value="Ready")
-        self.statusbar = ttk.Label(window, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
-        self.statusbar.pack(side=tk.BOTTOM, fill=tk.X)
         
         # Initialize variables
         self.webcam = cv2.VideoCapture(0)
@@ -443,14 +285,6 @@ class LipstickApp:
         # Convert BGR to RGB for tkinter
         rgb_color = f'#{self.current_color[2]:02x}{self.current_color[1]:02x}{self.current_color[0]:02x}'
         self.current_color_canvas.config(bg=rgb_color)
-    
-    def take_screenshot(self):
-        """Save current frame as screenshot"""
-        if hasattr(self, 'current_frame'):
-            timestamp = cv2.getTickCount()
-            filename = f"lipstick_screenshot_{timestamp}.jpg"
-            cv2.imwrite(filename, self.current_frame)
-            self.status_var.set(f"Screenshot saved as {filename}")
     
     def update(self):
         """Update the video frame"""
@@ -518,9 +352,6 @@ class LipstickApp:
                 # If no landmarks detected in current frame but we have previous ones
                 frame = apply_lipstick(clean_frame, self.prev_landmarks, self.current_color, intensity, blur_amount)
             
-            # Store the current frame for screenshots
-            self.current_frame = frame.copy()
-            
             # Convert to RGB for tkinter
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
@@ -546,7 +377,8 @@ class LipstickApp:
 def main():
     # Create the root window
     root = tk.Tk()
-    root.title("Lipstick Virtual Try-On")
+    root.title("Makeup Virtual Try-On")
+    root.resizable(False, False)  # Disable resizing
     
     # Set a more modern theme if available
     try:
@@ -558,7 +390,7 @@ def main():
         pass  # If theming fails, use default
     
     # Create the app
-    app = LipstickApp(root, "Lipstick Virtual Try-On GUI")
+    app = VirtualMakeUpApp(root, "MakeUp Virtual Try-On")
     
     # Start the main loop
     root.mainloop()
