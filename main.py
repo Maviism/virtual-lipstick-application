@@ -5,162 +5,16 @@ import tkinter as tk
 from tkinter import ttk, colorchooser, filedialog
 from PIL import Image, ImageTk
 import os
+from modules.lipstick_processor import apply_lipstick 
+from modules.constants import LIPSTICK_COLORS 
+from modules.utils import remove_background
 
 # Initialize MediaPipe Face Detection and Face Mesh solutions
 mp_face_detection = mp.solutions.face_detection
 mp_face_mesh = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
-mp_selfie_segmentation = mp.solutions.selfie_segmentation  # Add selfie segmentation
-
-# Define lipstick shades with BGR format (OpenCV uses BGR instead of RGB)
-LIPSTICK_COLORS = [
-    (43, 32, 212),  # Red
-    (164, 73, 163),  # Pink
-    (0, 0, 128),    # Maroon
-    (172, 79, 57),  # Royal Blue
-    (133, 58, 133), # Purple
-    (75, 177, 243)  # Coral
-]
-
-# Full set of lip landmarks from MediaPipe Face Mesh
-# Complete lips outline (upper and lower)
-LIPS_ALL = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185, 
-           61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146,
-           78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95]
-
-# Inner lips contour
-INNER_LIPS = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 415, 310, 311, 312, 13, 82, 81, 80, 191]
-
-
-def create_convex_hull(landmarks, indices, image_shape):
-    """Create a convex hull from landmarks for better coverage"""
-    h, w = image_shape[:2]
-    points = []
-    
-    for idx in indices:
-        pt = landmarks.landmark[idx]
-        x, y = int(pt.x * w), int(pt.y * h)
-        points.append((x, y))
-    
-    # Convert points to numpy array for hull calculation
-    points = np.array(points, dtype=np.int32)
-    hull = cv2.convexHull(points)
-    return hull
-
-def apply_lipstick(image, landmarks, color, intensity=0.8, blur_amount=5):
-    """
-    Apply lipstick shade to lips using face landmarks with improved technique
-    
-    Parameters:
-    - image: Input image
-    - landmarks: Face landmarks from MediaPipe
-    - color: BGR color for lipstick
-    - intensity: Opacity/intensity of lipstick (0.0 to 1.0)
-    - blur_amount: Amount of blur to apply for smoother edges
-    
-    Returns:
-    - Image with lipstick applied
-    """
-    # Create a separate layer for the lipstick
-    h, w, _ = image.shape
-    mask = np.zeros((h, w), dtype=np.uint8)
-    
-    # Create a convex hull for the entire lips for better coverage
-    lips_hull = create_convex_hull(landmarks, LIPS_ALL, image.shape)
-    
-    # Fill the outer lips area
-    cv2.fillPoly(mask, [lips_hull], 255)
-    
-    # Get inner lip points
-    inner_points = []
-    for idx in INNER_LIPS:
-        pt = landmarks.landmark[idx]
-        x, y = int(pt.x * w), int(pt.y * h)
-        inner_points.append((x, y))
-    
-    # Create inner lips convex hull
-    inner_points = np.array(inner_points, dtype=np.int32)
-    inner_hull = cv2.convexHull(inner_points)
-    
-    # Cut out inner lips
-    cv2.fillPoly(mask, [inner_hull], 0)
-    
-    # Apply slight dilation to ensure coverage
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.dilate(mask, kernel, iterations=1)
-    
-    # Apply blur for smoother edges
-    mask = cv2.GaussianBlur(mask, (blur_amount, blur_amount), 0)
-    
-    # Create a color adjustment layer for more natural look
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    hsv_mask = np.zeros_like(hsv)
-    
-    # Extract BGR color components
-    b, g, r = color
-    
-    # Convert to HSV for better blending
-    color_hsv = cv2.cvtColor(np.uint8([[color]]), cv2.COLOR_BGR2HSV)[0][0]
-    h_value, s_value, _ = color_hsv
-    
-    # Set HSV values for the lipstick
-    hsv_mask[:, :, 0] = h_value  # Hue from lipstick color
-    hsv_mask[:, :, 1] = s_value  # Saturation from lipstick color
-    hsv_mask[:, :, 2] = hsv[:, :, 2]  # Keep original brightness
-    
-    # Convert back to BGR
-    color_layer = cv2.cvtColor(hsv_mask, cv2.COLOR_HSV2BGR)
-    
-    # Apply the mask
-    mask_3d = np.stack([mask, mask, mask], axis=2) / 255.0
-    
-    # Use overlay blending mode for more natural look
-    def overlay_blend(bg, fg, alpha):
-        # Apply overlay blend mode formula
-        fg_norm = fg / 255.0
-        bg_norm = bg / 255.0
-        
-        # Overlay blend mode formula
-        blend = np.zeros_like(bg_norm)
-        # Where background <= 0.5
-        mask_dark = bg_norm <= 0.5
-        blend[mask_dark] = 2 * bg_norm[mask_dark] * fg_norm[mask_dark]
-        # Where background > 0.5
-        mask_light = ~mask_dark
-        blend[mask_light] = 1 - 2 * (1 - bg_norm[mask_light]) * (1 - fg_norm[mask_light])
-        
-        # Apply alpha blending
-        result = alpha * blend + (1 - alpha) * bg_norm
-        return (result * 255).astype(np.uint8)
-    
-    # Apply overlay blend
-    b_channel = overlay_blend(image[:,:,0], color_layer[:,:,0], intensity * mask_3d[:,:,0])
-    g_channel = overlay_blend(image[:,:,1], color_layer[:,:,1], intensity * mask_3d[:,:,1])
-    r_channel = overlay_blend(image[:,:,2], color_layer[:,:,2], intensity * mask_3d[:,:,2])
-    
-    # Combine channels
-    result = cv2.merge([b_channel, g_channel, r_channel])
-    
-    # Add a subtle highlight for a glossy effect
-    highlight_mask = mask.copy()
-    highlight_mask = cv2.dilate(highlight_mask, np.ones((2, 2), np.uint8), iterations=1)
-    highlight_mask = cv2.erode(highlight_mask, np.ones((5, 5), np.uint8), iterations=1)
-    highlight_mask = cv2.GaussianBlur(highlight_mask, (15, 15), 0)
-    
-    # Create a fixed scalar value for highlight intensity (0.3)
-    highlight_intensity = 0.05
-    
-    # Apply the highlight effect using proper scalar values
-    highlight_layer = np.ones_like(image) * 255
-    highlight_mask_3d = np.stack([highlight_mask, highlight_mask, highlight_mask], axis=2) / 255.0
-    
-    # Use element-wise multiplication for the mask instead of max operation
-    for c in range(3):  # Apply to each channel
-        result[:,:,c] = result[:,:,c] * (1 - highlight_intensity * highlight_mask_3d[:,:,c]) + \
-                        highlight_layer[:,:,c] * (highlight_intensity * highlight_mask_3d[:,:,c])
-    
-    return result
+mp_selfie_segmentation = mp.solutions.selfie_segmentation  
 
 # New tkinter GUI wrapper class
 class VirtualMakeUpApp:
@@ -188,7 +42,7 @@ class VirtualMakeUpApp:
         self.preset_buttons_frame = ttk.Frame(self.frame_presets)
         self.preset_buttons_frame.pack(fill=tk.X, padx=2, pady=5)
         
-        for i, color in enumerate(LIPSTICK_COLORS):
+        for name, color in LIPSTICK_COLORS.items():
             # Convert BGR to RGB for tkinter
             rgb_color = f'#{color[2]:02x}{color[1]:02x}{color[0]:02x}'
             
@@ -198,12 +52,12 @@ class VirtualMakeUpApp:
             
             # Create a button with the color as background
             btn = tk.Button(
-          self.preset_buttons_frame, 
-          text=f"Color {i+1}",
-          bg=rgb_color,
-          fg=text_color,
-          width=10,
-          command=lambda c=color, i=i: self.select_preset_color(c, i)
+                self.preset_buttons_frame, 
+                text=name,
+                bg=rgb_color,
+                fg=text_color,
+                width=10,
+                command=lambda c=color, n=name: self.select_preset_color(c, n)
             )
             
             btn.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2)
@@ -278,8 +132,11 @@ class VirtualMakeUpApp:
         
         # Initialize variables
         self.webcam = cv2.VideoCapture(0)
-        self.color_idx = 0
-        self.current_color = LIPSTICK_COLORS[self.color_idx]
+        
+        # Get list of color names and set initial color
+        self.color_names = list(LIPSTICK_COLORS.keys())
+        self.current_color_name = self.color_names[0]
+        self.current_color = LIPSTICK_COLORS[self.current_color_name]
         self.update_color_display()
         
         # Initialize MediaPipe Face Mesh
@@ -349,10 +206,10 @@ class VirtualMakeUpApp:
             except Exception as e:
                 print(f"Error loading image: {str(e)}")
     
-    def select_preset_color(self, color, idx):
+    def select_preset_color(self, color, color_name):
         """Set lipstick color to a preset color"""
         self.current_color = color
-        self.color_idx = idx
+        self.current_color_name = color_name
         self.update_color_display()
         
     def choose_custom_color(self):
@@ -365,7 +222,7 @@ class VirtualMakeUpApp:
             rgb_color = color_result[0]
             # Convert RGB to BGR for OpenCV
             self.current_color = (int(rgb_color[2]), int(rgb_color[1]), int(rgb_color[0]))
-            self.color_idx = -1  # Custom color
+            self.current_color_name = "Custom"  # Custom color
             self.update_color_display()
     
     def update_color_display(self):
@@ -395,29 +252,15 @@ class VirtualMakeUpApp:
                 # Process with MediaPipe Selfie Segmentation
                 segmentation_results = self.selfie_segmentation.process(frame_rgb)
                 
-                # Create a mask of the person
-                condition = np.stack((segmentation_results.segmentation_mask,) * 3, axis=-1) > 0.1
-                
-                # Process background based on selected option
-                if self.bg_type.get() == "color":
-                    # Create solid color background
-                    bg_image = np.ones(frame.shape, dtype=np.uint8)
-                    bg_image[:] = self.bg_color
-                    
-                elif self.bg_type.get() == "image" and self.bg_image is not None:
-                    # Resize background image to match frame size
-                    bg_image = cv2.resize(self.bg_image, (frame.shape[1], frame.shape[0]))
-                else:
-                    # Use default background if available, else green background
-                    if self.default_bg_image is not None:
-                        bg_image = cv2.resize(self.default_bg_image, (frame.shape[1], frame.shape[0]))
-                    else:
-                        # Default to green background if image is not available
-                        bg_image = np.ones(frame.shape, dtype=np.uint8)
-                        bg_image[:] = (0, 128, 0)  # Green default
-                
-                # Apply the foreground mask and background image
-                frame = np.where(condition, frame, bg_image)
+                # Use the background removal function from utils module
+                frame = remove_background(
+                    frame, 
+                    segmentation_results, 
+                    self.bg_type.get(), 
+                    self.bg_color, 
+                    self.bg_image, 
+                    self.default_bg_image
+                )
                 clean_frame = frame.copy()  # Update clean frame with background removed
             
             frame.flags.writeable = True
@@ -437,7 +280,7 @@ class VirtualMakeUpApp:
                 self.prev_landmarks = face_landmarks
                 
                 # Apply lipstick
-                frame = apply_lipstick(clean_frame, face_landmarks, self.current_color, intensity, blur_amount)
+                # frame = apply_lipstick(clean_frame, face_landmarks, self.current_color, intensity, blur_amount)
                 
                 if show_mesh:
                     # Draw the face landmarks
