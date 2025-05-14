@@ -21,17 +21,24 @@ class VirtualMakeUpApp:
     def __init__(self, window, window_title):
         self.window = window
         self.window.title(window_title)
+          # Create main container frames
+        self.main_container = ttk.Frame(window)
+        self.main_container.pack(fill=tk.BOTH, expand=True)
+        
+        # Create a container for webcam and input mode
+        self.right_container = ttk.Frame(self.main_container)
+        self.right_container.pack(side=tk.RIGHT, padx=10, pady=10, fill=tk.BOTH)
         
         # Create a frame for the webcam feed
-        self.frame_webcam = ttk.Frame(window)
-        self.frame_webcam.pack(side=tk.RIGHT, padx=10, pady=10)
+        self.frame_webcam = ttk.Frame(self.right_container)
+        self.frame_webcam.pack(side=tk.TOP, padx=0, pady=0)
         
         # Create a label for the webcam feed
         self.label_webcam = ttk.Label(self.frame_webcam)
         self.label_webcam.pack()
         
         # Create a frame for the controls
-        self.frame_controls = ttk.Frame(window)
+        self.frame_controls = ttk.Frame(self.main_container)
         self.frame_controls.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.Y)
         
         # Create a frame for preset colors
@@ -129,9 +136,55 @@ class VirtualMakeUpApp:
         self.show_mesh_checkbox = ttk.Checkbutton(self.frame_controls, text="Show Face Mesh", 
                                                 variable=self.show_mesh_var)
         self.show_mesh_checkbox.pack(anchor=tk.W, padx=5, pady=10)
+          # Add image mode section below the webcam frame
+        self.frame_image_mode = ttk.LabelFrame(self.right_container, text="Input Mode")
+        self.frame_image_mode.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
+        
+        # Create a horizontal layout for input mode controls
+        self.image_mode_controls = ttk.Frame(self.frame_image_mode)
+        self.image_mode_controls.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Left side controls
+        self.image_left_frame = ttk.Frame(self.image_mode_controls)
+        self.image_left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        
+        # Use image checkbox
+        self.use_image_var = tk.BooleanVar(value=False)
+        self.use_image_checkbox = ttk.Checkbutton(
+            self.image_left_frame, 
+            text="Use Image", 
+            variable=self.use_image_var,
+            command=self.toggle_image_mode
+        )
+        self.use_image_checkbox.pack(anchor=tk.W, pady=2)
+        
+        # Label to show selected image name
+        self.image_label = ttk.Label(self.image_left_frame, text="No image selected")
+        self.image_label.pack(anchor=tk.W, pady=2)
+        
+        # Right side buttons
+        self.image_right_frame = ttk.Frame(self.image_mode_controls)
+        self.image_right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5)
+        
+        # Button to select input image
+        self.select_image_button = ttk.Button(
+            self.image_right_frame, 
+            text="Select Image", 
+            command=self.choose_input_image
+        )
+        self.select_image_button.pack(fill=tk.X, pady=2)
+        
+        # Button to return to webcam mode
+        self.return_to_webcam_button = ttk.Button(
+            self.image_right_frame, 
+            text="Return to Webcam", 
+            command=self.use_webcam_mode
+        )
+        self.return_to_webcam_button.pack(fill=tk.X, pady=2)
         
         # Initialize variables
-        self.webcam = cv2.VideoCapture(0)
+        self.webcam = cv2.VideoCapture(1)
+        self.camera_index = 1  # Track the current camera index
         
         # Get list of color names and set initial color
         self.color_names = list(LIPSTICK_COLORS.keys())
@@ -155,11 +208,19 @@ class VirtualMakeUpApp:
         # Previous landmarks for stability
         self.prev_landmarks = None
         
+        # Add image upload mode variables
+        self.use_image = False
+        self.image_path = None
+        self.image = None
+        
         # Start the video capture loop
         self.update()
         
         # Set window close handler
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Bind key events
+        self.window.bind('<k>', self.switch_camera)
         
     def choose_bg_color(self):
         """Open color picker for background color"""
@@ -233,12 +294,17 @@ class VirtualMakeUpApp:
     
     def update(self):
         """Update the video frame"""
-        ret, frame = self.webcam.read()
+        if self.use_image and self.image is not None:
+            # Use the uploaded image
+            frame = self.image.copy()
+            ret = True
+        else:
+            # Use webcam
+            ret, frame = self.webcam.read()
+            if ret:
+                frame = cv2.flip(frame, 1)  # Mirror the image for a more intuitive view
         
         if ret:
-            # Process the frame
-            frame = cv2.flip(frame, 1)  # Mirror the image for a more intuitive view
-            
             # Create a clean copy for lipstick application
             clean_frame = frame.copy()
             
@@ -280,7 +346,7 @@ class VirtualMakeUpApp:
                 self.prev_landmarks = face_landmarks
                 
                 # Apply lipstick
-                # frame = apply_lipstick(clean_frame, face_landmarks, self.current_color, intensity, blur_amount)
+                frame = apply_lipstick(clean_frame, face_landmarks, self.current_color, intensity, blur_amount)
                 
                 if show_mesh:
                     # Draw the face landmarks
@@ -315,15 +381,24 @@ class VirtualMakeUpApp:
             
             # Convert to RGB for tkinter
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+              # Calculate aspect ratio for resizing
+            h, w = frame_rgb.shape[:2]
+            target_width = 640
+            target_height = 480
             
-            # Convert to PIL format and then to ImageTk
-            img = Image.fromarray(frame_rgb)
-            img = img.resize((640, 480), Image.LANCZOS)  # Resize for display
-            imgtk = ImageTk.PhotoImage(image=img)
-            
-            # Update the label with new image
-            self.label_webcam.imgtk = imgtk
-            self.label_webcam.configure(image=imgtk)
+            # Preserve aspect ratio
+            if h > 0 and w > 0:
+                ratio = min(target_width / w, target_height / h)
+                new_size = (int(w * ratio), int(h * ratio))
+                
+                # Convert to PIL format and then to ImageTk
+                img = Image.fromarray(frame_rgb)
+                img = img.resize(new_size, Image.LANCZOS)
+                imgtk = ImageTk.PhotoImage(image=img)
+                
+                # Update the label with new image
+                self.label_webcam.imgtk = imgtk
+                self.label_webcam.configure(image=imgtk)
         
         # Schedule the next update
         self.window.after(10, self.update)
@@ -336,11 +411,85 @@ class VirtualMakeUpApp:
         self.selfie_segmentation.close()
         self.window.destroy()
 
+    def choose_input_image(self):
+        """Open file dialog to select an input image for processing"""
+        file_path = filedialog.askopenfilename(
+            title="Select Image",
+            filetypes=[
+                ("Image files", "*.png;*.jpg;*.jpeg;*.bmp"),
+                ("All files", "*.*")
+            ]
+        )
+        
+        if file_path:
+            try:
+                # Load the image
+                self.image_path = file_path
+                self.image = cv2.imread(file_path)
+                
+                # Update the display with the filename
+                filename = os.path.basename(file_path)
+                if len(filename) > 25:
+                    filename = filename[:22] + "..."
+                self.image_label.config(text=f"Selected: {filename}")
+                
+                # Set to image mode
+                self.use_image = True
+                self.use_image_var.set(True)
+                
+                print(f"Using image: {filename}")
+                
+            except Exception as e:
+                print(f"Error loading image: {str(e)}")
+    
+    def toggle_image_mode(self):
+        """Toggle between image mode and webcam mode"""
+        self.use_image = self.use_image_var.get()
+        
+        if self.use_image and self.image is None:
+            # Prompt to select an image if none is selected
+            self.choose_input_image()
+            
+    def use_webcam_mode(self):
+        """Switch back to webcam mode"""
+        self.use_image = False
+        self.use_image_var.set(False)
+        print("Returned to webcam mode")
+        
+    def switch_camera(self, event=None):
+        """Switch between available cameras"""
+        # Close current camera
+        if self.webcam.isOpened():
+            self.webcam.release()
+        
+        # Try to open next camera
+        next_index = (self.camera_index + 1) % 4  # Cycle through cameras 0, 1, 2
+        self.webcam = cv2.VideoCapture(next_index)
+        
+        # If the camera opened successfully, update the index
+        if self.webcam.isOpened():
+            self.camera_index = next_index
+            print(f"Switched to camera {self.camera_index}")
+        else:
+            # If failed, try camera 0 as fallback
+            self.webcam = cv2.VideoCapture(0)
+            if self.webcam.isOpened():
+                self.camera_index = 0
+                print(f"Switched to camera {self.camera_index}")
+            else:
+                print("Failed to switch camera")
+                # Try to reopen the previous camera
+                self.webcam = cv2.VideoCapture(self.camera_index)
+        
 def main():
     # Create the root window
     root = tk.Tk()
     root.title("Makeup Virtual Try-On")
     root.resizable(False, False)  # Disable resizing
+    
+    # Show startup message
+    print("Virtual Makeup Application started")
+    print("Press 'k' key to switch between cameras")
     
     # Set a more modern theme if available
     try:
