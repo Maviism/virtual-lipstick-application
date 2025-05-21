@@ -2,7 +2,6 @@
 
 A computer vision application that applies virtual lipstick in real-time using webcam or static images.
 
-![Virtual Makeup App](https://github.com/yourusername/virtual-makeup-app/raw/main/screenshot.jpg)
 
 ## Features
 
